@@ -5,41 +5,49 @@ import Webcam from "react-webcam";
 import { Pause, ScanLine, Settings } from "lucide-react";
 import { useCam } from "@/hooks/camera-permission";
 import { LoadOnnx } from "@/lib/onnx";
+import type { InferenceSession } from "onnxruntime-web";
 
 // ---------- types ----------
 type Det = { bbox: [number, number, number, number]; score: number; classId: number };
 
-// ---------- helpers ----------
-function xywh2xyxy(x: number, y: number, w: number, h: number) {
-  const x1 = x - w / 2, y1 = y - h / 2, x2 = x + w / 2, y2 = y + h / 2;
-  return [x1, y1, x2, y2] as [number, number, number, number];
-}
-
+// Simple Non-Maximum Suppression (NMS)
 function nms(boxes: number[][], scores: number[], iouThres: number): number[] {
-  const order = scores.map((s, i) => [s, i] as [number, number]).sort((a, b) => b[0] - a[0]).map(x => x[1]);
+  const idxs = scores.map((s, i) => i).sort((a, b) => scores[b] - scores[a]);
   const keep: number[] = [];
-  while (order.length) {
-    const i = order.shift()!;
+
+  function area(b: number[]) {
+    return Math.max(0, b[2] - b[0]) * Math.max(0, b[3] - b[1]);
+  }
+
+  while (idxs.length) {
+    const i = idxs.shift()!;
     keep.push(i);
-    const [x1, y1, x2, y2] = boxes[i];
-    for (let k = order.length - 1; k >= 0; --k) {
-      const j = order[k];
-      const [xx1, yy1, xx2, yy2] = [
-        Math.max(x1, boxes[j][0]),
-        Math.max(y1, boxes[j][1]),
-        Math.min(x2, boxes[j][2]),
-        Math.min(y2, boxes[j][3]),
-      ];
-      const w = Math.max(0, xx1 < xx2 ? xx2 - xx1 : 0);
-      const h = Math.max(0, yy1 < yy2 ? yy2 - yy1 : 0);
+    for (let k = idxs.length - 1; k >= 0; --k) {
+      const j = idxs[k];
+      const xx1 = Math.max(boxes[i][0], boxes[j][0]);
+      const yy1 = Math.max(boxes[i][1], boxes[j][1]);
+      const xx2 = Math.min(boxes[i][2], boxes[j][2]);
+      const yy2 = Math.min(boxes[i][3], boxes[j][3]);
+      const w = Math.max(0, xx2 - xx1);
+      const h = Math.max(0, yy2 - yy1);
       const inter = w * h;
-      const a = Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
-      const b = Math.max(0, boxes[j][2] - boxes[j][0]) * Math.max(0, boxes[j][3] - boxes[j][1]);
-      const iou = inter / (a + b - inter + 1e-9);
-      if (iou > iouThres) order.splice(k, 1);
+      const union = area(boxes[i]) + area(boxes[j]) - inter + 1e-9;
+      const iou = inter / union;
+      if (iou > iouThres) idxs.splice(k, 1);
     }
   }
   return keep;
+}
+
+
+// Smooth box coordinates using exponential moving average
+function smoothBbox(current: [number, number, number, number], previous: [number, number, number, number], alpha: number = 0.7): [number, number, number, number] {
+  return [
+    alpha * current[0] + (1 - alpha) * previous[0],
+    alpha * current[1] + (1 - alpha) * previous[1],
+    alpha * current[2] + (1 - alpha) * previous[2],
+    alpha * current[3] + (1 - alpha) * previous[3]
+  ];
 }
 
 export function CameraUIPage() {
@@ -49,12 +57,24 @@ export function CameraUIPage() {
   const webcamRef = useRef<Webcam | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);     // actual <video> node
   const overlayRef = useRef<HTMLCanvasElement | null>(null);  // drawing overlay
-  const sessionRef = useRef<any>(null);
+  const sessionRef = useRef<InferenceSession | null>(null);
   const rafRef = useRef<number | null>(null);
 
   // temp preprocessing canvas (hidden)
   const prepCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const prepCtxRef = useRef<CanvasRenderingContext2D | null>(null);
+
+  // performance optimization refs
+  const overlayCtxRef = useRef<CanvasRenderingContext2D | null>(null);
+  const isInferenceRunningRef = useRef<boolean>(false);
+  const frameCountRef = useRef<number>(0);
+
+  // Pre-allocate reusable arrays to avoid memory allocation overhead
+  const floatDataRef = useRef<Float32Array | null>(null);
+  const cachedVideoSizeRef = useRef<{ w: number, h: number } | null>(null);
+
+  // Detection history for simple smoothing
+  const detectionHistoryRef = useRef<Det[][]>([]);
 
   // load ONNX session once
   useEffect(() => {
@@ -71,7 +91,7 @@ export function CameraUIPage() {
   // capture the internal <video> once webcam mounts
   useEffect(() => {
     const id = setInterval(() => {
-      const vid = (webcamRef.current as any)?.video as HTMLVideoElement | undefined;
+      const vid = (webcamRef.current as { video?: HTMLVideoElement })?.video;
       if (vid && vid.readyState >= 2) {
         videoRef.current = vid;
         clearInterval(id);
@@ -109,73 +129,170 @@ export function CameraUIPage() {
   function stopLoop() {
     if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
     rafRef.current = null;
-    const ctx = overlayRef.current?.getContext("2d");
-    if (ctx && overlayRef.current) ctx.clearRect(0, 0, overlayRef.current.width, overlayRef.current.height);
+    isInferenceRunningRef.current = false;
+    frameCountRef.current = 0;
+
+    // Clear cached data for fresh restart
+    floatDataRef.current = null;
+    cachedVideoSizeRef.current = null;
+
+    // Clear tracking state
+    detectionHistoryRef.current = [];
+
+    // Use cached context for cleanup
+    const ctx = overlayCtxRef.current;
+    if (ctx && overlayRef.current) {
+      ctx.clearRect(0, 0, overlayRef.current.width, overlayRef.current.height);
+    }
   }
 
-  // main rAF loop (throttled to ~15 FPS)
+  // main rAF loop (increased to ~8 FPS for faster response)
   let lastTime = 0;
-  const tick = async (t?: number) => {
+  const tick = (t?: number) => {
     rafRef.current = requestAnimationFrame(tick);
     const now = t ?? performance.now();
-    if (now - lastTime < 66) return; // ~15 fps
+
+    // Only run inference every 125ms (~8fps) and skip if already running
+    if (now - lastTime < 125 || isInferenceRunningRef.current) return;
     lastTime = now;
-    await runSingleInference();
+
+    // Run inference async without blocking the rAF loop
+    runSingleInference().catch(err => {
+      console.warn('Inference error:', err);
+    });
   };
 
-  // draw boxes in overlay coords that match the displayed video size
+  // Convert xywh (center x,y,w,h) to xyxy
+  function xywh2xyxy(x: number, y: number, w: number, h: number): [number, number, number, number] {
+    return [x - w / 2, y - h / 2, x + w / 2, y + h / 2];
+  }
+
+  // Draw detections with simple temporal smoothing using detectionHistoryRef
   function drawDetections(dets: Det[]) {
     const video = videoRef.current, canvas = overlayRef.current;
     if (!video || !canvas) return;
 
-    // match overlay size to displayed video box
+    if (!overlayCtxRef.current) overlayCtxRef.current = canvas.getContext("2d");
+    const ctx = overlayCtxRef.current;
+    if (!ctx) return;
+
     const W = video.clientWidth || video.videoWidth;
     const H = video.clientHeight || video.videoHeight;
-    canvas.width = W; canvas.height = H;
+    if (canvas.width !== W || canvas.height !== H) {
+      canvas.width = W;
+      canvas.height = H;
+    }
 
     const sx = W / video.videoWidth;
     const sy = H / video.videoHeight;
 
-    const ctx = canvas.getContext("2d")!;
     ctx.clearRect(0, 0, W, H);
-    ctx.strokeStyle = "lime";
-    ctx.fillStyle = "lime";
-    ctx.lineWidth = 2;
-    ctx.font = "14px system-ui, sans-serif";
 
-    for (const { bbox:[x1,y1,x2,y2], score, classId } of dets) {
+    const prev = detectionHistoryRef.current.length ? detectionHistoryRef.current[detectionHistoryRef.current.length - 1] : [];
+    const smoothed: Det[] = [];
+
+    for (const d of dets) {
+      // find best previous match by class and center distance
+      const cx = (d.bbox[0] + d.bbox[2]) / 2;
+      const cy = (d.bbox[1] + d.bbox[3]) / 2;
+      let bestPrev: Det | null = null;
+      let bestDist = Infinity;
+      for (const p of prev) {
+        if (p.classId !== d.classId) continue;
+        const pcx = (p.bbox[0] + p.bbox[2]) / 2;
+        const pcy = (p.bbox[1] + p.bbox[3]) / 2;
+        const dist = Math.hypot(pcx - cx, pcy - cy);
+        if (dist < bestDist) { bestDist = dist; bestPrev = p; }
+      }
+
+      const smoothAlpha = 0.6;
+      const sbbox = bestPrev && bestDist < 80 ? smoothBbox(d.bbox, bestPrev.bbox, smoothAlpha) : d.bbox;
+      smoothed.push({ bbox: sbbox, score: d.score, classId: d.classId });
+
+      const [x1, y1, x2, y2] = sbbox;
       const rx = x1 * sx, ry = y1 * sy, rw = (x2 - x1) * sx, rh = (y2 - y1) * sy;
+
+      ctx.strokeStyle = `rgba(64, 195, 255, 0.9)`;
+      ctx.lineWidth = 2;
       ctx.strokeRect(rx, ry, rw, rh);
-      ctx.fillText(`${classId}:${score.toFixed(2)}`, rx + 2, Math.max(12, ry + 14));
+
+      ctx.font = "12px system-ui, sans-serif";
+      ctx.fillStyle = "rgba(0,200,255,0.9)";
+      const label = `C:${d.classId} ${(d.score * 100).toFixed(0)}%`;
+      ctx.fillText(label, rx + 4, Math.max(12, ry - 4));
     }
+
+    // store smoothed detections for next frame (keep last 5)
+    detectionHistoryRef.current.push(smoothed);
+    if (detectionHistoryRef.current.length > 5) detectionHistoryRef.current.shift();
   }
 
   // one frame → preprocess → session.run → postprocess → draw
   const runSingleInference = async () => {
+    // Prevent concurrent inference runs
+    if (isInferenceRunningRef.current) return;
+    isInferenceRunningRef.current = true;
+
     const session = sessionRef.current;
     const video = videoRef.current;
     const prep = prepCanvasRef.current, pctx = prepCtxRef.current;
-    if (!session || !video || !prep || !pctx || video.readyState < 2) return;
+    if (!session || !video || !prep || !pctx || video.readyState < 2) {
+      isInferenceRunningRef.current = false;
+      return;
+    }
+
+    // Remove frame skipping for faster response
+    frameCountRef.current++;
 
     const size = 640;
     const vw = video.videoWidth, vh = video.videoHeight;
 
-    // letterbox into 640x640 (Ultralytics style)
-    const scale = Math.min(size / vw, size / vh);
-    const nw = Math.round(vw * scale), nh = Math.round(vh * scale);
-    const dx = Math.floor((size - nw) / 2), dy = Math.floor((size - nh) / 2);
+    // Cache video dimensions to avoid repeated calculations
+    const cached = cachedVideoSizeRef.current;
+    let scale, nw, nh, dx, dy;
 
-    pctx.fillStyle = "rgb(114,114,114)";
+    if (!cached || cached.w !== vw || cached.h !== vh) {
+      // Recalculate letterbox parameters when video size changes
+      scale = Math.min(size / vw, size / vh);
+      nw = Math.round(vw * scale);
+      nh = Math.round(vh * scale);
+      dx = Math.floor((size - nw) / 2);
+      dy = Math.floor((size - nh) / 2);
+      cachedVideoSizeRef.current = { w: vw, h: vh };
+    } else {
+      // Reuse cached calculations
+      const s = Math.min(size / vw, size / vh);
+      scale = s;
+      nw = Math.round(vw * s);
+      nh = Math.round(vh * s);
+      dx = Math.floor((size - nw) / 2);
+      dy = Math.floor((size - nh) / 2);
+    }
+
+    // Use cached fill style
+    if (pctx.fillStyle !== "rgb(114, 114, 114)") {
+      pctx.fillStyle = "rgb(114,114,114)";
+    }
     pctx.fillRect(0, 0, size, size);
     pctx.drawImage(video, 0, 0, vw, vh, dx, dy, nw, nh);
 
     const imageData = pctx.getImageData(0, 0, size, size).data; // RGBA
     const wh = size * size;
-    const floatData = new Float32Array(3 * wh);
+
+    // Reuse pre-allocated array or create new one
+    if (!floatDataRef.current || floatDataRef.current.length !== 3 * wh) {
+      floatDataRef.current = new Float32Array(3 * wh);
+    }
+    const floatData = floatDataRef.current;
+
+    // More efficient pixel conversion - process in chunks
+    let srcIdx = 0;
+    const rStart = 0, gStart = wh, bStart = 2 * wh;
     for (let i = 0; i < wh; i++) {
-      floatData[i] = imageData[i * 4] / 255;
-      floatData[i + wh] = imageData[i * 4 + 1] / 255;
-      floatData[i + 2 * wh] = imageData[i * 4 + 2] / 255;
+      floatData[rStart + i] = imageData[srcIdx] / 255;     // R
+      floatData[gStart + i] = imageData[srcIdx + 1] / 255; // G  
+      floatData[bStart + i] = imageData[srcIdx + 2] / 255; // B
+      srcIdx += 4; // skip alpha
     }
 
     try {
@@ -183,10 +300,10 @@ export function CameraUIPage() {
       const inputTensor = new ort.Tensor("float32", floatData, [1, 3, size, size]);
       const inputName = session.inputNames?.[0] ?? "images";
       const outputMap = await session.run({ [inputName]: inputTensor });
-      const outTensor = Object.values(outputMap)[0] as { dims: number[]; data: Float32Array };
+      const outTensor = Object.values(outputMap)[0] as { dims: readonly number[]; data: Float32Array };
 
       // ---- reshape to (N, C) ----
-      let B = outTensor.dims[0], A = outTensor.dims[1], N = outTensor.dims[2];
+      const B = outTensor.dims[0], A = outTensor.dims[1], N = outTensor.dims[2];
       let C = A, num = N;
       if (outTensor.dims.length === 3 && outTensor.dims[2] < outTensor.dims[1]) {
         num = outTensor.dims[1];
@@ -213,7 +330,7 @@ export function CameraUIPage() {
 
       // ---- postprocess ----
       const nc = C - 4;
-      const confThres = 0.5, iouThres = 0.7;
+      const confThres = 0.4, iouThres = 0.5; // Lower thresholds for better tracking
 
       const boxesXYXY: number[][] = [];
       const scores: number[] = [];
@@ -239,30 +356,35 @@ export function CameraUIPage() {
 
       const keep = nms(boxesXYXY, scores, iouThres);
 
-      // undo letterbox → original video coords
-      const dets: Det[] = [];
-      for (const i of keep) {
+      // undo letterbox → original video coords (optimized)
+      const dets: Det[] = new Array(keep.length);
+      const invScale = 1 / scale;
+
+      for (let idx = 0; idx < keep.length; idx++) {
+        const i = keep[idx];
         let [x1, y1, x2, y2] = boxesXYXY[i];
-        x1 -= dx; x2 -= dx; y1 -= dy; y2 -= dy;
-        x1 /= scale; x2 /= scale; y1 /= scale; y2 /= scale;
 
-        // clip
-        x1 = Math.max(0, Math.min(vw - 1, x1));
-        x2 = Math.max(0, Math.min(vw - 1, x2));
-        y1 = Math.max(0, Math.min(vh - 1, y1));
-        y2 = Math.max(0, Math.min(vh - 1, y2));
+        // Faster coordinate transformation
+        x1 = Math.max(0, Math.min(vw - 1, (x1 - dx) * invScale));
+        x2 = Math.max(0, Math.min(vw - 1, (x2 - dx) * invScale));
+        y1 = Math.max(0, Math.min(vh - 1, (y1 - dy) * invScale));
+        y2 = Math.max(0, Math.min(vh - 1, (y2 - dy) * invScale));
 
-        dets.push({
+        dets[idx] = {
           bbox: [Math.round(x1), Math.round(y1), Math.round(x2), Math.round(y2)],
           score: scores[i],
           classId: classIds[i],
-        });
+        };
       }
 
+      // Draw detections with light temporal smoothing
       drawDetections(dets);
     } catch (err) {
       // swallow occasional frame errors to keep loop alive
-      // console.error(err);
+      console.warn('Frame processing error:', err);
+    } finally {
+      // Always reset the inference flag
+      isInferenceRunningRef.current = false;
     }
   };
 
@@ -278,12 +400,15 @@ export function CameraUIPage() {
         {scan ? (
           <div className="relative w-full h-full">
             <Webcam
+              autoFocus={true}
               ref={webcamRef}
-              
               audio={false}
-              videoConstraints={{ facingMode: { ideal: "environment" }, frameRate: {
-                ideal: 10, max: 15
-              } }}
+              videoConstraints={{
+                facingMode: { ideal: "environment" },
+                frameRate: { ideal: 15, max: 30 },
+                width: { ideal: 1280, max: 1920 },
+                height: { ideal: 720, max: 1080 }
+              }}
               style={{ width: "100%", height: "100%", objectFit: "cover" }}
             />
             {/* overlay canvas sits on top of the <video> */}

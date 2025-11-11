@@ -1,4 +1,4 @@
-import * as ort from "onnxruntime-web/webgpu";
+import * as ort from "onnxruntime-web";
 
 let _session: ort.InferenceSession | null = null;
 
@@ -9,7 +9,9 @@ export async function LoadOnnx() {
 
     // Create session using wasm EP to avoid pulling the WebGPU bundle (which can
     // cause invalid URL resolution inside some bundlers / Next.js setups).
-    const session = await ort.InferenceSession.create("best.onnx");
+    const session = await ort.InferenceSession.create("/best.onnx", {
+      executionProviders: ["wasm"],
+    });
     console.log("sec", session);
 
     if (!session) {
