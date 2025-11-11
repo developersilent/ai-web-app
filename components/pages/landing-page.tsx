@@ -3,6 +3,7 @@
 import { ChevronRight } from "lucide-react";
 import landingImg from "@/public/assets/landing-img.png";
 import Image from "next/image";
+import Link from "next/link";
 
 export function LandingPage() {
   return (
@@ -16,9 +17,13 @@ export function LandingPage() {
           height={300}
         />
       </div>
-      <button className="bg-violet-400 w-7/12 flex items-center justify-center p-2.5 rounded-4xl">
-        <ChevronRight className="text-black/80" />
-      </button>
+      <Link href="/video"  className="bg-violet-400 w-7/12 flex items-center justify-center p-2.5 rounded-4xl">
+        <button   
+        >
+          <ChevronRight className="text-black/80" />
+        </button>
+      </Link>
+
     </div>
   )
 }

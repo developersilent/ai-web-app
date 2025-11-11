@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Activity, useEffect, useRef, useState } from "react";
 import Webcam from "react-webcam";
 import { Pause, ScanLine, Settings } from "lucide-react";
 import { useCam } from "@/hooks/camera-permission";
 import { LoadOnnx } from "@/lib/onnx";
 import type { InferenceSession } from "onnxruntime-web";
+import Link from "next/link";
 
 // ---------- types ----------
 type Det = { bbox: [number, number, number, number]; score: number; classId: number };
@@ -96,9 +97,9 @@ export function CameraUIPage() {
         videoRef.current = vid;
         clearInterval(id);
       }
-    }, 200);
+    }, 100);
     return () => clearInterval(id);
-  }, [scan]);
+  }, [scan, webcamRef, videoRef, overlayRef]);
 
   // start/stop loop on scan toggle
   const handleScan = () => {
@@ -119,9 +120,10 @@ export function CameraUIPage() {
     // init preprocessing canvas once
     if (!prepCanvasRef.current) {
       const c = document.createElement("canvas");
-      c.width = 640; c.height = 640;
+      c.width = 720; c.height = 640;
       prepCanvasRef.current = c;
-      prepCtxRef.current = c.getContext("2d");
+      // We will read pixels from this canvas (getImageData) — hint the browser to optimize for reads
+      prepCtxRef.current = c.getContext("2d", { willReadFrequently: true });
     }
     tick();
   }
@@ -391,35 +393,45 @@ export function CameraUIPage() {
   return (
     <div className="min-h-screen overflow-hidden">
       <div className="h-16 flex items-center justify-end px-1">
-        <button className="px-5 py-2 text-white/90 flex gap-2 items-center outline-none">
-          <Settings />
-        </button>
+        <Link href="/settings"
+          className="px-5 py-2 text-white/90 flex gap-2 items-center outline-none"
+        >
+
+          <button
+            className="px-5 py-2 text-white/90 flex gap-2 items-center outline-none">
+            <Settings />
+          </button>
+        </Link>
       </div>
 
-      <div className="h-[600px] overflow-hidden flex border rounded-xl m-3 items-center justify-center relative">
+      <div className="h-[500px] overflow-hidden flex border rounded-xl m-3 items-center justify-center relative">
         {scan ? (
-          <div className="relative w-full h-full">
-            <Webcam
-              autoFocus={true}
-              ref={webcamRef}
-              audio={false}
-              videoConstraints={{
-                facingMode: { ideal: "environment" },
-                frameRate: { ideal: 15, max: 30 },
-                width: { ideal: 1280, max: 1920 },
-                height: { ideal: 720, max: 1080 }
-              }}
-              style={{ width: "100%", height: "100%", objectFit: "cover" }}
-            />
-            {/* overlay canvas sits on top of the <video> */}
-            <canvas
-              ref={overlayRef}
-              className="pointer-events-none absolute inset-0"
-              style={{ width: "100%", height: "100%" }}
-            />
-          </div>
+          <Activity mode={scan ? "visible" : "hidden"}>
+            <div className="relative w-full h-full">
+              <Webcam
+                autoFocus={true}
+                ref={webcamRef}
+                audio={false}
+                videoConstraints={{
+                  facingMode: { ideal: "environment" },
+                  frameRate: { ideal: 15, max: 30 },
+                  width: { ideal: 1280, max: 1920 },
+                  height: { ideal: 720, max: 1080 }
+                }}
+                style={{ width: "100%", height: "100%", objectFit: "cover" }}
+              />
+              {/* overlay canvas sits on top of the <video> */}
+              <canvas
+                ref={overlayRef}
+                className="pointer-events-none absolute inset-0"
+                style={{ width: "100%", height: "100%" }}
+              />
+            </div>
+          </Activity>
         ) : (
-          <p>Press the Scan to use the camera</p>
+          <div className="flex items-center justify-center h-[500px]">
+            <p>Press the Scan to use the camera</p>
+          </div>
         )}
       </div>
 
@@ -446,5 +458,5 @@ export function CameraUIPage() {
         <p className="text-lg font-medium">AI info</p>
       </div>
     </div>
-  );
+  )
 }

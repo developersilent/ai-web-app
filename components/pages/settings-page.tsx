@@ -13,12 +13,12 @@ import {
 import { languages } from "@/lib/lang";
 import { useEffect, useState } from "react";
 import { useCam } from "@/hooks/camera-permission";
+import Link from "next/link";
 
 
 export function SettingsPage() {
   const [lang, setLang] = useState<typeof languages[0]>({ code: "eng", label: "English" });
   const { cameraState, setCameraState } = useCam();
-
   useEffect(() => {
     (async () => {
       if (navigator.permissions) {
@@ -50,15 +50,18 @@ export function SettingsPage() {
     }
   }
 
-  console.log(cameraState)
   return (
     <div className="min-h-screen overflow-hidden">
       {/* header  */}
       <div className="h-20 flex items-center px-1">
-        <button className="px-5 py-2 text-white/90 flex gap-2 items-center outline-none">
-          <ChevronLeft />
-          <p className="text-base font-medium">Settings</p>
-        </button>
+        <Link href="/video"
+          className="px-5 py-2 text-white/90 flex gap-2 items-center outline-none">
+          <button
+            className="px-5 py-2 text-white/90 flex gap-2 items-center outline-none">
+            <ChevronLeft />
+            <p className="text-base font-medium">Settings</p>
+          </button>
+        </Link>
       </div>
       <div className="border m-5 rounded-2xl flex flex-col">
         <p className="text-xs px-3 p-3 m-2 mb-0">Permissions</p>

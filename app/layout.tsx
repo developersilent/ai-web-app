@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { CameraPermissionProvider } from "@/hooks/camera-permission";
+import RouteTransitions from "@/components/route-transitions";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -29,9 +30,11 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         <CameraPermissionProvider>
-          {children}
+          <RouteTransitions>
+            {children}
+          </RouteTransitions>
         </CameraPermissionProvider>
       </body>
     </html>
-  );
+  )
 }
