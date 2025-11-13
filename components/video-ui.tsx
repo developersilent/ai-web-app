@@ -72,7 +72,7 @@ export function VideoUI() {
 
   return (
     <div>
-      <video ref={vidRef} controls className="max-w-md h-full aspect-video transition-opacity" autoPlay muted src={"/demo.mp4"} />
+      <video ref={vidRef} className="max-w-md h-full aspect-video transition-opacity" autoPlay muted src={"/demo.mp4"} />
       {/* <div>
         <p>Phase: {phase}</p>
         <p>Time: {time}</p>
