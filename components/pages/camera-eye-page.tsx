@@ -465,7 +465,7 @@ export function CameraUIPage() {
         </p>
 
         <p className="text-lg font-medium w-full">
-          Time: <span className="text-teal-400">{Math.floor(Math.abs(time || 0))}sec</span>
+          Time: <span className="text-teal-400">{time}sec</span>
         </p>
         <p className="text-lg font-medium w-full">
           Distance: <span className="text-purple-400">{dist}m</span>
