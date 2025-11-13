@@ -33,17 +33,17 @@ export function VideoUI() {
         }
 
         newMax = Math.max(1.3, newMax); // Clamp to 1.3+
-        displayTime = Math.max(0, Math.min(dur, displayTime));
+        displayTime = Math.max(0.8, Math.min(dur, displayTime));
         setMaxDistance(Number(newMax.toFixed(2)));
         setTime(Number(displayTime.toFixed(2)));
 
         // Use the fluctuated displayTime for phase logic
-        if (displayTime >= 5) {
-          setPhase("cross")
-        } else if (displayTime >= 3 && displayTime <= 5) {
+        if (displayTime >= 2 && displayTime <= 5) {
           setPhase("gesture")
-        } else {
+        } else if (displayTime < 2) {
           setPhase("don't cross")
+        } else {
+          setPhase("cross")
         }
 
         // run additional logic only when the video is playing (not paused/ended)
@@ -72,7 +72,7 @@ export function VideoUI() {
 
   return (
     <div>
-      <video ref={vidRef} className="max-w-md h-full aspect-video transition-opacity" autoPlay muted src={"/demo.mp4"} />
+      <video ref={vidRef} controls className="max-w-md h-full aspect-video transition-opacity" autoPlay muted src={"/demo.mp4"} />
       {/* <div>
         <p>Phase: {phase}</p>
         <p>Time: {time}</p>
