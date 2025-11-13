@@ -4,8 +4,8 @@ import { VideoUI } from "@/components/video-ui";
 export default function Home() {
   return (
     <>
-      {/* <LandingPage /> */}
-      <VideoUI />
+      <LandingPage />
+      {/* <VideoUI /> */}
     </>
   )
 }

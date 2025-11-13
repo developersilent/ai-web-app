@@ -7,6 +7,8 @@ import { useCam } from "@/hooks/camera-permission";
 import { LoadOnnx } from "@/lib/onnx";
 import type { InferenceSession } from "onnxruntime-web";
 import Link from "next/link";
+import { VideoUI } from "../video-ui";
+import { useVideo } from "@/hooks/lol";
 
 // ---------- types ----------
 type Det = { bbox: [number, number, number, number]; score: number; classId: number };
@@ -52,6 +54,7 @@ function smoothBbox(current: [number, number, number, number], previous: [number
 }
 
 export function CameraUIPage() {
+  const { dist, phase, time } = useVideo();
   const { cameraState } = useCam();
   const [scan, setScan] = useState(false);
 
@@ -404,32 +407,33 @@ export function CameraUIPage() {
         </Link>
       </div>
 
-      <div className="h-[500px] overflow-hidden flex border rounded-xl m-3 items-center justify-center relative">
+      <div className="h-auto mt-20 overflow-hidden flex border rounded-xl m-3 items-center justify-center relative">
         {scan ? (
           <Activity mode={scan ? "visible" : "hidden"}>
             <div className="relative w-full h-full">
-              <Webcam
-                autoFocus={true}
-                ref={webcamRef}
-                audio={false}
-                videoConstraints={{
-                  facingMode: { ideal: "environment" },
-                  frameRate: { ideal: 15, max: 30 },
-                  width: { ideal: 1280, max: 1920 },
-                  height: { ideal: 720, max: 1080 }
-                }}
-                style={{ width: "100%", height: "100%", objectFit: "cover" }}
-              />
+              {/* <Webcam */}
+              {/*   autoFocus={true} */}
+              {/*   ref={webcamRef} */}
+              {/*   audio={false} */}
+              {/*   videoConstraints={{ */}
+              {/*     facingMode: { ideal: "environment" }, */}
+              {/*     frameRate: { ideal: 15, max: 30 }, */}
+              {/*     width: { ideal: 1280, max: 1920 }, */}
+              {/*     height: { ideal: 720, max: 1080 } */}
+              {/*   }} */}
+              {/*   style={{ width: "100%", height: "100%", objectFit: "cover" }} */}
+              {/* /> */}
               {/* overlay canvas sits on top of the <video> */}
-              <canvas
-                ref={overlayRef}
-                className="pointer-events-none absolute inset-0"
-                style={{ width: "100%", height: "100%" }}
-              />
+              {/* <canvas */}
+              {/*   ref={overlayRef} */}
+              {/*   className="pointer-events-none absolute inset-0" */}
+              {/*   style={{ width: "100%", height: "100%" }} */}
+              {/* /> */}
+              <VideoUI />
             </div>
           </Activity>
         ) : (
-          <div className="flex items-center justify-center h-[500px]">
+          <div className="flex items-center justify-center h-64 flex-col">
             <p>Press the Scan to use the camera</p>
           </div>
         )}
@@ -454,8 +458,19 @@ export function CameraUIPage() {
         </button>
       </div>
 
-      <div className="h-[200px] border rounded-xl m-3 flex items-center justify-center">
-        <p className="text-lg font-medium">AI info</p>
+      <div className="flex-1 p-5 gap-2 border rounded-xl m-3 flex items-center justify-center flex-col text-xl">
+
+        <p className="text-lg font-medium w-full">
+          Phase: <span className={`capitalize ${phase === 'cross' ? "text-green-500" : phase === 'gesture' ? "text-yellow-500" : "text-red-500"}`}>{phase}</span>
+        </p>
+
+        <p className="text-lg font-medium w-full">
+          Time: <span className="text-teal-400">{Math.floor(Math.abs(time || 0))}sec</span>
+        </p>
+        <p className="text-lg font-medium w-full">
+          Distance: <span className="text-purple-400">{dist}m</span>
+        </p>
+
       </div>
     </div>
   )
