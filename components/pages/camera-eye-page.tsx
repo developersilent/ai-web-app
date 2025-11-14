@@ -411,25 +411,24 @@ export function CameraUIPage() {
         {scan ? (
           <Activity mode={scan ? "visible" : "hidden"}>
             <div className="relative w-full h-full">
-              {/* <Webcam */}
-              {/*   autoFocus={true} */}
-              {/*   ref={webcamRef} */}
-              {/*   audio={false} */}
-              {/*   videoConstraints={{ */}
-              {/*     facingMode: { ideal: "environment" }, */}
-              {/*     frameRate: { ideal: 15, max: 30 }, */}
-              {/*     width: { ideal: 1280, max: 1920 }, */}
-              {/*     height: { ideal: 720, max: 1080 } */}
-              {/*   }} */}
-              {/*   style={{ width: "100%", height: "100%", objectFit: "cover" }} */}
-              {/* /> */}
+              <Webcam
+                autoFocus={true}
+                ref={webcamRef}
+                audio={false}
+                videoConstraints={{
+                  facingMode: { ideal: "environment" },
+                  frameRate: { ideal: 15, max: 30 },
+                  width: { ideal: 1280, max: 1920 },
+                  height: { ideal: 720, max: 1080 }
+                }}
+                style={{ width: "100%", height: "100%", objectFit: "cover" }}
+              />
               {/* overlay canvas sits on top of the <video> */}
-              {/* <canvas */}
-              {/*   ref={overlayRef} */}
-              {/*   className="pointer-events-none absolute inset-0" */}
-              {/*   style={{ width: "100%", height: "100%" }} */}
-              {/* /> */}
-              <VideoUI />
+              <canvas
+                ref={overlayRef}
+                className="pointer-events-none absolute inset-0"
+                style={{ width: "100%", height: "100%" }}
+              />
             </div>
           </Activity>
         ) : (
